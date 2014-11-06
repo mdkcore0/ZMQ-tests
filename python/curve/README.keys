@@ -1,0 +1,4 @@
+To generate public and private keys, run this script [1] from the pyzmq 
+on this directory.
+
+[1] https://github.com/zeromq/pyzmq/blob/master/examples/security/generate_certificates.py
