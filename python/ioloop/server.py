@@ -32,9 +32,11 @@ class Worker(Thread):
 
             reply_message = ""
             if message["type"] == "message" and message["data"] == "Yo!":
-                reply_message = {'type': 'list', 'data': jsonData}
+                reply_message = utils.create_message('list',
+                        jsonData)
+
             if message["type"] == "message" and message["data"] == "PING":
-                reply_message = {'type': 'message', 'data': 'PONG'}
+                reply_message = utils.create_message('list', 'PONG')
 
             worker.send(ident, zmq.SNDMORE)
             worker.send_json(reply_message)
@@ -81,6 +83,9 @@ if __name__ == '__main__':
 
                     worker = Worker(context)
                     worker.start()
+
+                    #client = [ident, worker]
+                    #clients.append(client)
 
                 backend.send_multipart([ident, message])
 

@@ -15,7 +15,7 @@ ident = ""
 
 def heartbeat():
     try:
-        message = {'type': 'message', 'data': 'PING'}
+        message = utils.create_message('message', 'PING')
         socket.send_json(message)
 
         utils.log(">>", ident, message)
@@ -54,7 +54,7 @@ if __name__ == '__main__':
     socket_stream.on_recv(handle_recv)
 
     # run baby, run
-    message = {'type': 'message', 'data': 'Yo!'}
+    message = utils.create_message('message', 'Yo!')
     socket.send_json(message)
 
     utils.log(">>", ident, message)

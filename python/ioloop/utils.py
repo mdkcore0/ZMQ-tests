@@ -8,3 +8,6 @@ def log(sign, ident, message, append=""):
         msg = "%s | %s" % (msg, append)
 
     print msg
+
+def create_message(type, data):
+    return {'type': type, 'data': data}
