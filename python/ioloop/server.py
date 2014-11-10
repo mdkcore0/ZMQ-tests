@@ -4,6 +4,7 @@ import json
 import sys
 
 from threading import Thread
+from threading import current_thread
 
 import utils
 
@@ -13,23 +14,21 @@ jsonData = [
         ]
 
 class Worker(Thread):
-    def __init__(self, context):
+    def __init__(self, context, ident):
         Thread.__init__(self)
 
         self.context = context
         self.last_ping = 0
 
-    def run(self):
-        worker = self.context.socket(zmq.DEALER)
-        worker.connect("inproc://backend")
+        self.worker = self.context.socket(zmq.DEALER)
+        self.worker.setsockopt(zmq.IDENTITY, ident)
+        self.worker.connect("inproc://backend")
 
+    def run(self):
         print "Server worker thread started"
 
         while True:
-            ident, message = worker.recv_multipart()
-            if self.last_ping == 0:
-                worker.setsockopt(zmq.IDENTITY, ident)
-
+            ident, message = self.worker.recv_multipart()
             message = json.loads(message)
 
             utils.log("<<", ident, message)
@@ -42,27 +41,28 @@ class Worker(Thread):
             # XXX simple heartbeat, not working yet
             if message["type"] == "message" and message["data"] == "PING":
                 ping_now = time.time() * 1000.0
-                print ping_now - self.last_ping
+                print "(%s | %s)" % (ping_now - self.last_ping, current_thread())
                 accepting = 1000.0 + 10.0
+                reply_message = utils.create_message('list', 'PONG')
 
                 # simple test for ping
-                if (ping_now - self.last_ping <= accepting
-                    or self.last_ping == 0):
-                    reply_message = utils.create_message('list', 'PONG')
-                    self.last_ping = ping_now
-                else:
-                    print "DISCONNECT!"
+                #if (ping_now - self.last_ping <= accepting
+                    #or self.last_ping == 0):
+                    #reply_message = utils.create_message('list', 'PONG')
+                    #self.last_ping = ping_now
+                #else:
+                    #print "DISCONNECT!"
 
 
-            worker.send(ident, zmq.SNDMORE)
-            worker.send_json(reply_message)
+            self.worker.send(ident, zmq.SNDMORE)
+            self.worker.send_json(reply_message)
 
             utils.log(">>", ident, reply_message)
 
             # a little wait to avoid chaos :p
             time.sleep(1.0)
 
-        worker.close()
+        self.worker.close()
 
 if __name__ == '__main__':
     print "Initializing server on port 5555"
@@ -97,7 +97,7 @@ if __name__ == '__main__':
                 if ident not in clients:
                     clients.append(ident)
 
-                    worker = Worker(context)
+                    worker = Worker(context, ident)
                     worker.start()
 
                 backend.send_multipart([ident, message])
