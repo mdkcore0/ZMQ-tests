@@ -17,6 +17,7 @@ class Worker(Thread):
         Thread.__init__(self)
 
         self.context = context
+        self.last_ping = 0
 
     def run(self):
         worker = self.context.socket(zmq.DEALER)
@@ -26,6 +27,9 @@ class Worker(Thread):
 
         while True:
             ident, message = worker.recv_multipart()
+            if self.last_ping == 0:
+                worker.setsockopt(zmq.IDENTITY, ident)
+
             message = json.loads(message)
 
             utils.log("<<", ident, message)
@@ -35,8 +39,20 @@ class Worker(Thread):
                 reply_message = utils.create_message('list',
                         jsonData)
 
+            # XXX simple heartbeat, not working yet
             if message["type"] == "message" and message["data"] == "PING":
-                reply_message = utils.create_message('list', 'PONG')
+                ping_now = time.time() * 1000.0
+                print ping_now - self.last_ping
+                accepting = 1000.0 + 10.0
+
+                # simple test for ping
+                if (ping_now - self.last_ping <= accepting
+                    or self.last_ping == 0):
+                    reply_message = utils.create_message('list', 'PONG')
+                    self.last_ping = ping_now
+                else:
+                    print "DISCONNECT!"
+
 
             worker.send(ident, zmq.SNDMORE)
             worker.send_json(reply_message)
@@ -83,9 +99,6 @@ if __name__ == '__main__':
 
                     worker = Worker(context)
                     worker.start()
-
-                    #client = [ident, worker]
-                    #clients.append(client)
 
                 backend.send_multipart([ident, message])
 
