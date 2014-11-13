@@ -6,6 +6,10 @@ import sys
 from threading import Thread
 from threading import current_thread
 
+from zmq.eventloop.ioloop import ZMQIOLoop
+from zmq.eventloop.ioloop import PeriodicCallback
+from zmq.eventloop.zmqstream import ZMQStream
+
 import utils
 
 jsonData = [
@@ -24,45 +28,56 @@ class Worker(Thread):
         self.worker.setsockopt(zmq.IDENTITY, ident)
         self.worker.connect("inproc://backend")
 
-    def run(self):
-        print "Server worker thread started"
+        # ioloop
+        self.loop = ZMQIOLoop.instance()
+        socket_stream = ZMQStream(self.worker, self.loop)
+        socket_stream.on_recv(self.handle_recv)
 
-        while True:
-            ident, message = self.worker.recv_multipart()
-            message = json.loads(message)
+    def handle_recv(self, msg):
+        ident, message = msg
+        message = json.loads(message)
 
-            utils.log("<<", ident, message)
+        utils.log("<<", ident, message)
 
-            reply_message = ""
-            if message["type"] == "message" and message["data"] == "Yo!":
-                reply_message = utils.create_message('list',
-                        jsonData)
+        reply_message = ""
+        if message["type"] == "message" and message["data"] == "Yo!":
+            reply_message = utils.create_message('list', jsonData)
 
-            # XXX simple heartbeat, not working yet
-            if message["type"] == "message" and message["data"] == "PING":
-                ping_now = time.time() * 1000.0
-                print "(%s | %s)" % (ping_now - self.last_ping, current_thread())
-                accepting = 1000.0 + 10.0
-                reply_message = utils.create_message('list', 'PONG')
+        # XXX simple heartbeat, not working yet
+        if message["type"] == "message" and message["data"] == "PING":
+            ping_now = time.time() * 1000.0
+            print "\t\t %s" % (ping_now - self.last_ping)
+            #print "(%s | %s)" % (ping_now - self.last_ping, current_thread())
+            accepting = 1000.0 + 10.0
+            reply_message = utils.create_message('message', 'PONG')
 
-                # simple test for ping
-                #if (ping_now - self.last_ping <= accepting
-                    #or self.last_ping == 0):
-                    #reply_message = utils.create_message('list', 'PONG')
-                    #self.last_ping = ping_now
-                #else:
-                    #print "DISCONNECT!"
+            ## simple test for ping
+            ##if (ping_now - self.last_ping <= accepting
+                ##or self.last_ping == 0):
+                ##reply_message = utils.create_message('list', 'PONG')
+                ##self.last_ping = ping_now
+            ##else:
+                ##print "DISCONNECT!"
 
-
+        if reply_message:
             self.worker.send(ident, zmq.SNDMORE)
             self.worker.send_json(reply_message)
 
             utils.log(">>", ident, reply_message)
 
-            # a little wait to avoid chaos :p
-            time.sleep(1.0)
+    def wat(self):
+        print "WAT"
 
-        self.worker.close()
+    def run(self):
+        print "Server worker thread started"
+
+        #self.loop.add_callback(self.wat)
+        self.loop.start()
+
+        #while True:
+            #print "pong?"
+
+            #time.sleep(1.0)
 
 if __name__ == '__main__':
     print "Initializing server on port 5555"
