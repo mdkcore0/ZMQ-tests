@@ -6,10 +6,6 @@ import sys
 from threading import Thread
 from threading import current_thread
 
-from zmq.eventloop.ioloop import ZMQIOLoop
-from zmq.eventloop.ioloop import PeriodicCallback
-from zmq.eventloop.zmqstream import ZMQStream
-
 import utils
 
 jsonData = [
@@ -18,66 +14,86 @@ jsonData = [
         ]
 
 class Worker(Thread):
-    def __init__(self, context, ident):
+    connectionCloseCallback = None
+
+    def __init__(self, context, ident, connectionCloseCallback=None):
+    #def __init__(self, context, ident):
         Thread.__init__(self)
 
         self.context = context
-        self.last_ping = 0
 
         self.worker = self.context.socket(zmq.DEALER)
         self.worker.setsockopt(zmq.IDENTITY, ident)
         self.worker.connect("inproc://backend")
 
-        # ioloop
-        self.loop = ZMQIOLoop.instance()
-        socket_stream = ZMQStream(self.worker, self.loop)
-        socket_stream.on_recv(self.handle_recv)
+        self.connectionCloseCallback = connectionCloseCallback
 
-    def handle_recv(self, msg):
-        ident, message = msg
-        message = json.loads(message)
-
-        utils.log("<<", ident, message)
-
-        reply_message = ""
-        if message["type"] == "message" and message["data"] == "Yo!":
-            reply_message = utils.create_message('list', jsonData)
-
-        # XXX simple heartbeat, not working yet
-        if message["type"] == "message" and message["data"] == "PING":
-            ping_now = time.time() * 1000.0
-            print "\t\t %s" % (ping_now - self.last_ping)
-            #print "(%s | %s)" % (ping_now - self.last_ping, current_thread())
-            accepting = 1000.0 + 10.0
-            reply_message = utils.create_message('message', 'PONG')
-
-            ## simple test for ping
-            ##if (ping_now - self.last_ping <= accepting
-                ##or self.last_ping == 0):
-                ##reply_message = utils.create_message('list', 'PONG')
-                ##self.last_ping = ping_now
-            ##else:
-                ##print "DISCONNECT!"
-
-        if reply_message:
-            self.worker.send(ident, zmq.SNDMORE)
-            self.worker.send_json(reply_message)
-
-            utils.log(">>", ident, reply_message)
-
-    def wat(self):
-        print "WAT"
+        self.last_ping = 0
+        self.liveness = 3 # TODO
 
     def run(self):
         print "Server worker thread started"
 
-        #self.loop.add_callback(self.wat)
-        self.loop.start()
+        running = True
+        while running:
+            try:
+                ident, message = self.worker.recv_multipart(zmq.NOBLOCK)
+                message = json.loads(message)
 
-        #while True:
-            #print "pong?"
+                utils.log("<<", ident, message)
 
-            #time.sleep(1.0)
+                reply_message = ""
+                if message["type"] == "message" and message["data"] == "Yo!":
+                    reply_message = utils.create_message('list',
+                            jsonData)
+
+                # XXX simple heartbeat, not working yet
+                if message["type"] == "message" and message["data"] == "PING":
+                    reply_message = utils.create_message('message', 'PONG')
+
+                # any message is a heartbeat
+                # XXX change client to send real PINGS only when idle
+                self.liveness = 3 # TODO add a const with the max_liveness
+                self.last_ping = time.time() * 1000.0
+
+                self.worker.send(ident, zmq.SNDMORE)
+                self.worker.send_json(reply_message)
+
+                utils.log(">>", ident, reply_message)
+            except zmq.ZMQError, e:
+                if e.errno == zmq.EAGAIN:
+                    # test if already received a message
+                    if self.last_ping == 0:
+                        pass
+
+                    # TIMEOUT + NETWORK TIME
+                    accepting = 1000.0 + 10.0 # XXX find network time :p
+                    ping_now = time.time() * 1000.0
+
+                    print "%s %s | %s" % (ping_now, accepting, ping_now - self.last_ping)
+                    if ping_now - self.last_ping > accepting:
+                        self.liveness -= 1
+                        print "te liga: %s" % self.liveness
+
+                        if self.liveness <= 0:
+                            print "FOI-SE: %s" % self.liveness
+                            running = False
+
+                    # a little wait to avoid chaos :p
+                    time.sleep(1.0)
+                else:
+                    raise
+
+        self.worker.close()
+
+        if self.connectionCloseCallback:
+            self.connectionCloseCallback(ident)
+
+# TODO disconnection
+clients = []
+def onConnectionClose(ident):
+    print "HEY, '%s' TERMINATED!" % ident
+    clients.remove(ident)
 
 if __name__ == '__main__':
     print "Initializing server on port 5555"
@@ -96,9 +112,6 @@ if __name__ == '__main__':
     poll.register(frontend, zmq.POLLIN)
     poll.register(backend,  zmq.POLLIN)
 
-    # TODO disconnection
-    clients = []
-
     # run baby, run
     running = True
     while running:
@@ -112,7 +125,8 @@ if __name__ == '__main__':
                 if ident not in clients:
                     clients.append(ident)
 
-                    worker = Worker(context, ident)
+                    worker = Worker(context, ident, onConnectionClose)
+                    #worker = Worker(context, ident)
                     worker.start()
 
                 backend.send_multipart([ident, message])

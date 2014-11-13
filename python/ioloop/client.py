@@ -35,7 +35,8 @@ def handle_recv(msg):
     utils.log("<<", ident, message, append)
 
 if __name__ == '__main__':
-    ident = "banana%s" % randint(0, 100)
+    ident = "wigowigowigo" # XXX TEMP
+    #ident = "banana%s" % randint(0, 100)
     print "I am '%s' client" % ident
 
     # zmq setup
