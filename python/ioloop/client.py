@@ -68,6 +68,7 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print "Exiting like a sir"
 
+    pc.stop()
     loop.stop()
     socket.close()
     context.term()
