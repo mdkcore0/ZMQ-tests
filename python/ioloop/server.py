@@ -27,12 +27,14 @@ class Worker(Thread):
 
         self.worker = self.context.socket(zmq.DEALER)
         self.worker.setsockopt(zmq.IDENTITY, ident)
-        self.worker.connect("inproc://backend")
+        self.worker.connect("ipc://backend")
 
         self.connectionCloseCallback = connectionCloseCallback
 
         self.last_ping = 0
         self.liveness = MAX_LIVENESS
+
+        self.setName("thread-%s" % ident)
 
     def run(self):
         print "Server worker thread started"
@@ -43,7 +45,8 @@ class Worker(Thread):
                 ident, message = self.worker.recv_multipart(zmq.NOBLOCK)
                 message = json.loads(message)
 
-                utils.log("<<", ident, message)
+                utils.log("<<", ident, message, self.name)
+                #utils.log("<<", ident, message)
 
                 reply_message = ""
                 if message["type"] == "message" and message["data"] == "Yo!":
@@ -61,7 +64,7 @@ class Worker(Thread):
                     self.worker.send(ident, zmq.SNDMORE)
                     self.worker.send_json(reply_message)
 
-                    utils.log(">>", ident, reply_message)
+                    #utils.log(">>", ident, reply_message)
             except zmq.ZMQError, e:
                 if e.errno == zmq.EAGAIN:
                     if self.last_ping != 0:
@@ -102,7 +105,7 @@ if __name__ == '__main__':
     frontend.bind("tcp://*:5555")
     # will connect to the worker threads
     backend = context.socket(zmq.DEALER)
-    backend.bind("inproc://backend")
+    backend.bind("ipc://backend")
 
     # pool sockets for activity
     poll = zmq.Poller()
