@@ -13,11 +13,14 @@ jsonData = [
         {'name': 'Ratao', 'id': 69}
         ]
 
+MAX_LIVENESS = 3
+INTERVAL = 1000.0 * 1 # should be the same of the client
+NETWORK_TIME = 10.0 # value from outer world, find a proper value
+
 class Worker(Thread):
     connectionCloseCallback = None
 
     def __init__(self, context, ident, connectionCloseCallback=None):
-    #def __init__(self, context, ident):
         Thread.__init__(self)
 
         self.context = context
@@ -29,7 +32,7 @@ class Worker(Thread):
         self.connectionCloseCallback = connectionCloseCallback
 
         self.last_ping = 0
-        self.liveness = 3 # TODO
+        self.liveness = MAX_LIVENESS
 
     def run(self):
         print "Server worker thread started"
@@ -44,43 +47,38 @@ class Worker(Thread):
 
                 reply_message = ""
                 if message["type"] == "message" and message["data"] == "Yo!":
-                    reply_message = utils.create_message('list',
-                            jsonData)
+                    reply_message = utils.create_message('list', jsonData)
 
-                # XXX simple heartbeat, not working yet
                 if message["type"] == "message" and message["data"] == "PING":
                     reply_message = utils.create_message('message', 'PONG')
 
-                # any message is a heartbeat
+                # assuming any message is a heartbeat
                 # XXX change client to send real PINGS only when idle
-                self.liveness = 3 # TODO add a const with the max_liveness
+                self.liveness = MAX_LIVENESS
                 self.last_ping = time.time() * 1000.0
 
-                self.worker.send(ident, zmq.SNDMORE)
-                self.worker.send_json(reply_message)
+                if reply_message:
+                    self.worker.send(ident, zmq.SNDMORE)
+                    self.worker.send_json(reply_message)
 
-                utils.log(">>", ident, reply_message)
+                    utils.log(">>", ident, reply_message)
             except zmq.ZMQError, e:
                 if e.errno == zmq.EAGAIN:
-                    # test if already received a message
-                    if self.last_ping == 0:
-                        pass
+                    if self.last_ping != 0:
+                        # maximum accepting time diff
+                        accepting = (INTERVAL * (MAX_LIVENESS - self.liveness
+                            + 1)) + NETWORK_TIME
+                        ping_now = time.time() * 1000.0
 
-                    # TIMEOUT + NETWORK TIME
-                    accepting = 1000.0 + 10.0 # XXX find network time :p
-                    ping_now = time.time() * 1000.0
+                        if ping_now - self.last_ping > accepting:
+                            self.liveness -= 1
+                            utils.log("--", ident, "no data received (%s/%s)"
+                                    % (MAX_LIVENESS - self.liveness,
+                                        MAX_LIVENESS))
 
-                    print "%s %s | %s" % (ping_now, accepting, ping_now - self.last_ping)
-                    if ping_now - self.last_ping > accepting:
-                        self.liveness -= 1
-                        print "te liga: %s" % self.liveness
-
-                        if self.liveness <= 0:
-                            print "FOI-SE: %s" % self.liveness
-                            running = False
-
-                    # a little wait to avoid chaos :p
-                    time.sleep(1.0)
+                            if self.liveness <= 0:
+                                utils.log("__", ident, "closing connection")
+                                running = False
                 else:
                     raise
 
@@ -89,11 +87,10 @@ class Worker(Thread):
         if self.connectionCloseCallback:
             self.connectionCloseCallback(ident)
 
-# TODO disconnection
 clients = []
 def onConnectionClose(ident):
-    print "HEY, '%s' TERMINATED!" % ident
     clients.remove(ident)
+    print "Worker '%s' terminated" % ident
 
 if __name__ == '__main__':
     print "Initializing server on port 5555"
@@ -126,7 +123,6 @@ if __name__ == '__main__':
                     clients.append(ident)
 
                     worker = Worker(context, ident, onConnectionClose)
-                    #worker = Worker(context, ident)
                     worker.start()
 
                 backend.send_multipart([ident, message])
