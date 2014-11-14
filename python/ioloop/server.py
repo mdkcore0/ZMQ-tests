@@ -8,9 +8,10 @@ from threading import current_thread
 
 import utils
 
-jsonData = [
+DATA = [
         {'name': 'Zoiao', 'id': 23},
-        {'name': 'Ratao', 'id': 69}
+        {'name': 'Ratao', 'id': 69},
+        {'name': 'Adams', 'id': 42}
         ]
 
 MAX_LIVENESS = 3
@@ -20,21 +21,22 @@ NETWORK_TIME = 10.0 # value from outer world, find a proper value
 class Worker(Thread):
     connectionCloseCallback = None
 
-    def __init__(self, context, ident, connectionCloseCallback=None):
+    def __init__(self, context, identity, connectionCloseCallback=None):
         Thread.__init__(self)
 
         self.context = context
 
         self.worker = self.context.socket(zmq.DEALER)
-        self.worker.setsockopt(zmq.IDENTITY, ident)
+        self.worker.setsockopt(zmq.IDENTITY, identity)
         self.worker.connect("ipc://backend")
 
         self.connectionCloseCallback = connectionCloseCallback
 
+        self.identity = identity
         self.last_ping = 0
         self.liveness = MAX_LIVENESS
 
-        self.setName("thread-%s" % ident)
+        self.name = "thread-%s" % identity
 
     def run(self):
         print "Server worker thread started"
@@ -42,29 +44,27 @@ class Worker(Thread):
         running = True
         while running:
             try:
-                ident, message = self.worker.recv_multipart(zmq.NOBLOCK)
+                message = self.worker.recv(zmq.NOBLOCK)
                 message = json.loads(message)
 
-                utils.log("<<", ident, message, self.name)
-                #utils.log("<<", ident, message)
+                utils.log("<<", self.identity, message, self.name)
 
                 reply_message = ""
+                # note we are not handling that additional data sent by the
+                # client using that just to receive something over the time
                 if message["type"] == "message" and message["data"] == "Yo!":
-                    reply_message = utils.create_message('list', jsonData)
+                    reply_message = utils.create_message('list', DATA)
 
                 if message["type"] == "message" and message["data"] == "PING":
                     reply_message = utils.create_message('message', 'PONG')
 
                 # assuming any message is a heartbeat
-                # XXX change client to send real PINGS only when idle
                 self.liveness = MAX_LIVENESS
                 self.last_ping = time.time() * 1000.0
 
                 if reply_message:
-                    self.worker.send(ident, zmq.SNDMORE)
                     self.worker.send_json(reply_message)
-
-                    #utils.log(">>", ident, reply_message)
+                    utils.log(">>", ident, reply_message)
             except zmq.ZMQError, e:
                 if e.errno == zmq.EAGAIN:
                     if self.last_ping != 0:
@@ -75,12 +75,13 @@ class Worker(Thread):
 
                         if ping_now - self.last_ping > accepting:
                             self.liveness -= 1
-                            utils.log("--", ident, "no data received (%s/%s)"
-                                    % (MAX_LIVENESS - self.liveness,
-                                        MAX_LIVENESS))
+                            utils.log("--", self.identity,
+                                    "no data received (%s/%s)" % (MAX_LIVENESS
+                                        - self.liveness, MAX_LIVENESS))
 
                             if self.liveness <= 0:
-                                utils.log("__", ident, "closing connection")
+                                utils.log("__", self.identity,
+                                        "closing connection")
                                 running = False
                 else:
                     raise
@@ -88,7 +89,7 @@ class Worker(Thread):
         self.worker.close()
 
         if self.connectionCloseCallback:
-            self.connectionCloseCallback(ident)
+            self.connectionCloseCallback(self.identity)
 
 clients = []
 def onConnectionClose(ident):
@@ -104,7 +105,7 @@ if __name__ == '__main__':
     frontend = context.socket(zmq.ROUTER)
     frontend.bind("tcp://*:5555")
     # will connect to the worker threads
-    backend = context.socket(zmq.DEALER)
+    backend = context.socket(zmq.ROUTER)
     backend.bind("ipc://backend")
 
     # pool sockets for activity

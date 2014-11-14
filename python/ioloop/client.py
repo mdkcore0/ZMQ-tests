@@ -1,4 +1,5 @@
 import zmq
+import datetime
 import json
 import sys
 
@@ -12,8 +13,13 @@ import utils
 
 socket = None
 ident = ""
+idle= True
 
+# XXX change to send PINGS only when idle
 def heartbeat():
+    if not idle:
+        return
+
     try:
         message = utils.create_message('message', 'PING')
         socket.send_json(message)
@@ -22,6 +28,31 @@ def heartbeat():
     except Exception as e:
         print "Heartbeat error %s" % e.message
         loop.stop()
+
+def additional_data():
+    idle = False
+
+    try:
+        data = [{'date': datetime.date.today().strftime("%Y-%m-%d")}]
+        message = utils.create_message('message', data)
+        socket.send_json(message)
+        utils.log(">>", ident, message)
+
+        data = [{'string': "May the Force be with you"},
+                {"string": "Here Johnny!"}]
+        message = utils.create_message('message', data)
+        socket.send_json(message)
+        utils.log(">>", ident, message)
+
+        data = [{'dot': "."}]
+        message = utils.create_message('message', data)
+        socket.send_json(message)
+        utils.log(">>", ident, message)
+    except Exception as e:
+        print "Additional data sending error %s" % e.message
+        loop.stop()
+
+    idle = False
 
 def handle_recv(msg):
     message = json.loads(msg[0])
@@ -35,7 +66,6 @@ def handle_recv(msg):
     utils.log("<<", ident, message, append)
 
 if __name__ == '__main__':
-    #ident = "wigowigowigo" # XXX TEMP
     ident = "banana%s" % randint(0, 100)
     print "I am '%s' client" % ident
 
@@ -61,6 +91,8 @@ if __name__ == '__main__':
     utils.log(">>", ident, message)
 
     pc = PeriodicCallback(heartbeat, 1000, loop)
+    pc.start()
+    pc = PeriodicCallback(additional_data, 10000, loop)
     pc.start()
 
     try:
